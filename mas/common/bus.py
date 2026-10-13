@@ -16,8 +16,8 @@ import nats
 import nats.errors
 from nats.aio.client import Client as NatsClient
 from nats.js.api import AckPolicy, ConsumerConfig, RetentionPolicy, StorageType, StreamConfig
+from nats.js.errors import APIError, NotFoundError
 from nats.js.errors import Error as JsError
-from nats.js.errors import NotFoundError
 
 from mas.common.models import Event, Heartbeat, Result, Task
 from mas.common.settings import LLM_STEPS
@@ -28,6 +28,7 @@ log = logging.getLogger("mas.bus")
 STREAM_NAME = "TASKS"
 TASK_STEPS = ("intake", "triage", "reminder", "feedback", "feedback_reply")
 SUBJECT_HEARTBEAT = "agents.heartbeat"
+_JS_NO_MESSAGE_FOUND = 10057  # JSStreamMsgDeleteFailedF: сообщения с таким номером уже нет
 
 
 @dataclass
@@ -219,6 +220,10 @@ class NatsBus:
             await self._js.delete_msg(STREAM_NAME, seq)
         except NotFoundError:
             pass  # задачу уже забрал и подтвердил агент — удалять нечего
+        except APIError as exc:
+            # nats-py отдаёт «no message found» при удалении как ServerError (500), а не NotFoundError.
+            if exc.err_code != _JS_NO_MESSAGE_FOUND:
+                raise
 
     async def publish(self, subject: str, data: bytes, headers: dict[str, str] | None = None) -> None:
         await self.nc.publish(subject, data, headers=headers)
