@@ -22,7 +22,7 @@
 kind: feedback_reply
 step: feedback_reply
 concurrency: 2
-model: qwen2.5:1.5b
+model: qwen2.5:3b
 temperature: 0.2
 num_predict: 300
 repeat_penalty: 1.1
