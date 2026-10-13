@@ -36,6 +36,10 @@ def setup_logging(level: str = "INFO", log_file: str = "") -> logging.Logger:
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
     formatter = JsonFormatter()
+    # На Windows перенаправленный stderr открыт в кодировке ANSI (cp1251), а Go-агенты
+    # пишут UTF-8: без перекодировки общий журнал из нескольких процессов не читается.
+    if (sys.stderr.encoding or "").lower().replace("-", "") != "utf8" and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     if log_file:
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
