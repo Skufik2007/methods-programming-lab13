@@ -172,6 +172,31 @@ class NatsBus:
                     # Параллельный старт другого процесса мог создать тот же консьюмер.
                     log.warning("consumer %s: %s", durable, exc)
 
+    async def consumer_stats(self, steps: tuple[str, ...] = TASK_STEPS) -> list[dict[str, int | str]]:
+        """Состояние консьюмеров `step-*` для дашборда: ожидают, в обработке, повторные доставки.
+
+        Отсутствующий консьюмер пропускается. Метод не входит в протокол `MessageBus`
+        (фейковые шины в тестах его не обязаны иметь) — вызывающий проверяет через getattr.
+        """
+        if self._js is None:
+            raise RuntimeError("шина не подключена: вызовите connect()")
+        rows: list[dict[str, int | str]] = []
+        for step in steps:
+            try:
+                info = await self._js.consumer_info(STREAM_NAME, f"step-{step}")
+            except NotFoundError:
+                continue
+            rows.append(
+                {
+                    "step": step,
+                    "consumer": f"step-{step}",
+                    "pending": info.num_pending,
+                    "ack_pending": info.num_ack_pending,
+                    "redelivered": info.num_redelivered,
+                }
+            )
+        return rows
+
     async def publish_task(self, task: Task, *, inject_trace: bool = True) -> None:
         if self._js is None:
             raise RuntimeError("шина не подключена: вызовите connect()")

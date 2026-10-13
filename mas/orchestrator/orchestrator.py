@@ -139,6 +139,13 @@ class Orchestrator:
             await asyncio.wait_for(event.wait(), timeout)
         return run
 
+    async def queue_stats(self) -> list[dict[str, Any]]:
+        """Состояние очередей JetStream (по консьюмеру `step-*`); пусто, если шина не умеет."""
+        getter = getattr(self.bus, "consumer_stats", None)
+        if getter is None:
+            return []
+        return list(await getter())
+
     # ---- запуск ---------------------------------------------------------------
 
     def _launch(self, kind: str, case: dict[str, Any], chain: Any) -> str:
