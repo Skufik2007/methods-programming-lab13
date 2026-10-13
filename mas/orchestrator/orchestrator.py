@@ -265,8 +265,9 @@ class Orchestrator:
                 self._pending[task.task_id] = pending
                 rec.attempts = attempt
                 self.store.touch(run)
+                seq: int | None = None
                 try:
-                    await self.bus.publish_task(task)
+                    seq = await self.bus.publish_task(task)
                     self.metrics.tasks += 1
                     await self._emit("published", run, step=step, task=task, summary=f"attempt={attempt}")
                     result = await asyncio.wait_for(pending.future, timeout)
@@ -274,6 +275,7 @@ class Orchestrator:
                     self.metrics.timeouts += 1
                     last_error = f"таймаут {timeout:g} с"
                     await self._emit("timeout", run, step=step, task=task, summary=f"attempt={attempt}")
+                    await self._discard(seq)
                     retryable = True
                 except Exception as exc:  # сбой публикации в шину — временная ошибка
                     last_error = f"ошибка публикации: {exc}"
@@ -302,6 +304,16 @@ class Orchestrator:
             self.store.touch(run)
             span.set_status(trace.Status(trace.StatusCode.ERROR, last_error))
             return _fail(last_error)
+
+    async def _discard(self, seq: int | None) -> None:
+        """Убирает из потока задачу попытки, ответа на которую больше не ждём: иначе агенты
+        выполняют работу для проваленных запусков, а backlog обманывает автомасштабировщик."""
+        if seq is None:
+            return
+        try:
+            await self.bus.discard_task(seq)
+        except Exception:
+            log.warning("не удалось удалить устаревшую задачу seq=%s", seq, exc_info=True)
 
     # ---- booking: аукцион ---------------------------------------------------------
 

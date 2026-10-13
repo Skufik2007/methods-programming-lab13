@@ -64,7 +64,13 @@ class MessageBus(Protocol):
     async def connect(self) -> None: ...
     async def close(self) -> None: ...
     async def ensure_stream(self, steps: tuple[str, ...] = TASK_STEPS) -> None: ...
-    async def publish_task(self, task: Task, *, inject_trace: bool = True) -> None: ...
+    async def publish_task(self, task: Task, *, inject_trace: bool = True) -> int:
+        """Публикует задачу в поток TASKS, возвращает номер сообщения в потоке."""
+        ...
+
+    async def discard_task(self, seq: int) -> None:
+        """Удаляет из потока задачу, ответа на которую оркестратор больше не ждёт."""
+        ...
     async def publish(self, subject: str, data: bytes, headers: dict[str, str] | None = None) -> None: ...
     async def subscribe(self, subject: str, handler: Handler) -> Subscription: ...
     async def request(self, subject: str, data: bytes, timeout: float) -> BusMessage:
@@ -197,13 +203,22 @@ class NatsBus:
             )
         return rows
 
-    async def publish_task(self, task: Task, *, inject_trace: bool = True) -> None:
+    async def publish_task(self, task: Task, *, inject_trace: bool = True) -> int:
         if self._js is None:
             raise RuntimeError("шина не подключена: вызовите connect()")
         headers = {"Nats-Msg-Id": task.msg_id}
         if inject_trace:
             inject_traceparent(headers)
-        await self._js.publish(f"tasks.{task.step}", task.model_dump_json().encode(), headers=headers)
+        ack = await self._js.publish(f"tasks.{task.step}", task.model_dump_json().encode(), headers=headers)
+        return ack.seq
+
+    async def discard_task(self, seq: int) -> None:
+        if self._js is None:
+            raise RuntimeError("шина не подключена: вызовите connect()")
+        try:
+            await self._js.delete_msg(STREAM_NAME, seq)
+        except NotFoundError:
+            pass  # задачу уже забрал и подтвердил агент — удалять нечего
 
     async def publish(self, subject: str, data: bytes, headers: dict[str, str] | None = None) -> None:
         await self.nc.publish(subject, data, headers=headers)
