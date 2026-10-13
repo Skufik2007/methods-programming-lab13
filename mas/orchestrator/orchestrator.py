@@ -33,6 +33,11 @@ log = logging.getLogger("mas.orchestrator")
 
 SOURCE = "orchestrator"
 EMERGENCY_RECOMMENDATION = "Вызовите скорую: 103"
+NO_SLOTS_URGENT = (
+    "Свободных приёмов в допустимый срок нет: обратитесь в кабинет неотложной помощи поликлиники "
+    "или вызовите врача на дом"
+)
+NO_SLOTS_ROUTINE = "Свободных приёмов в ближайшие недели нет: регистратура свяжется с вами для записи"
 
 # (шаг, kind задачи); booking выполняется аукционом, а не задачей JetStream.
 CASE_CHAIN: tuple[tuple[str, str], ...] = (
@@ -212,6 +217,13 @@ class Orchestrator:
             else:
                 payload = {"case": run.case, "previous": previous, "history": dict(history)}
                 outcome = await self._run_step(run, name, kind, payload)
+            if name == "booking" and outcome.error == "no_bids":
+                # Нет свободного врача в допустимом окне — это не сбой системы, а исход для пациента:
+                # он должен получить рекомендацию, что делать дальше (раздел 6, п. 3).
+                advice = NO_SLOTS_URGENT if history.get("triage", {}).get("urgency") == "urgent" else NO_SLOTS_ROUTINE
+                await self._emit("stopped", run, step="booking", summary=advice)
+                self._finish(run, "stopped", recommendation=advice)
+                return
             if not outcome.success:
                 self._finish(run, "failed", error=f"{name}: {outcome.error}")
                 return
@@ -322,7 +334,7 @@ class Orchestrator:
         intake = history.get("intake", {})
         specialty = triage.get("specialty") or intake.get("specialty") or "therapist"
         urgency = triage.get("urgency") or "routine"
-        max_wait = float(triage.get("max_wait_hours") or 72)
+        max_wait = base_wait = float(triage.get("max_wait_hours") or 72)
         rec = run.step("booking")
         rec.status = "running"
         rec.started_at = utc_now_str()
@@ -333,6 +345,11 @@ class Orchestrator:
                 rec.attempts = round_no
                 self.store.touch(run)
                 outcome = await self._auction_round(run, specialty, urgency, max_wait, exclude)
+                if outcome.error == "no_bids" and urgency == "routine" and max_wait == base_wait:
+                    # Плановому пациенту лучше запись позже, чем никакой: одно расширение окна.
+                    max_wait = base_wait * self.settings.no_bids_extend_factor
+                    await self._emit("retry", run, step="booking", summary=f"no_bids: окно расширено до {max_wait:g} ч")
+                    outcome = await self._auction_round(run, specialty, urgency, max_wait, exclude)
                 if outcome.success or outcome.error == "no_bids":
                     if outcome.success:
                         rec.status, rec.output, rec.agent_id = "completed", outcome.output, outcome.agent_id

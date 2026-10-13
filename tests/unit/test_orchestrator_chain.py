@@ -279,11 +279,13 @@ async def test_slot_taken_three_times_fails_booking() -> None:
     assert "slot_taken" in run.error
 
 
-async def test_no_bids_fails_run() -> None:
+async def test_no_bids_stops_run_with_advice() -> None:
+    # Правило изменено находкой №10: нет свободных врачей — это исход для пациента
+    # (stopped с рекомендацией), а не сбой системы (failed).
     bus = happy_bus(bids=[])
     run = await run_case(make_orch(bus))
-    assert run.status == "failed"
-    assert run.error == "booking: no_bids"
+    assert run.status == "stopped"
+    assert run.recommendation
     assert published_steps(bus) == ["intake", "triage"]
     assert bus.book_requests == []
     booking = next(s for s in run.steps if s.name == "booking")
@@ -293,8 +295,8 @@ async def test_no_bids_fails_run() -> None:
 async def test_only_ineligible_bids_means_no_bids() -> None:
     bus = happy_bus(bids=[bid("booking-a-1", 0.1, eligible=False)])
     run = await run_case(make_orch(bus))
-    assert run.status == "failed"
-    assert run.error == "booking: no_bids"
+    assert run.status == "stopped"
+    assert bus.book_requests == []
 
 
 async def test_booking_timeout_excludes_agent_in_next_round() -> None:

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     auction_window_s: float = 0.5
     book_timeout_s: float = 5.0
     max_auction_rounds: int = 3
+    # Раздел 6, п. 3: при no_bids плановое обращение получает второй аукцион с окном в N раз шире.
+    no_bids_extend_factor: float = 4.0
 
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:1.5b"

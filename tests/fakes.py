@@ -28,7 +28,7 @@ class FakeBus:
     def __init__(
         self,
         steps: dict[str, StepResponder] | None = None,
-        bids: list[dict[str, Any]] | None = None,
+        bids: list[dict[str, Any]] | Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
         book: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     ) -> None:
         self.steps = steps or {}
@@ -38,6 +38,7 @@ class FakeBus:
         self.published: list[Task] = []
         self.events: list[dict[str, Any]] = []
         self.book_requests: list[dict[str, Any]] = []
+        self.auctions: list[dict[str, Any]] = []
         self.discarded: list[int] = []
 
     async def subscribe(self, subject: str, handler: Any) -> _Sub:
@@ -67,8 +68,10 @@ class FakeBus:
         self.discarded.append(seq)
 
     async def collect(self, subject: str, data: bytes, window: float) -> list[BusMessage]:
-        auction_id = json.loads(data)["auction_id"]
-        return [BusMessage("inbox", json.dumps({**bid, "auction_id": auction_id}).encode()) for bid in self.bids]
+        req = json.loads(data)
+        self.auctions.append(req)
+        bids = self.bids(req) if callable(self.bids) else self.bids
+        return [BusMessage("inbox", json.dumps({**bid, "auction_id": req["auction_id"]}).encode()) for bid in bids]
 
     async def request(self, subject: str, data: bytes, timeout: float) -> BusMessage:
         req = json.loads(data)
