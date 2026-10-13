@@ -53,7 +53,18 @@ func score(t time.Time) float64 { return float64(t.UnixMilli()) / 1000 }
 
 // Schedule сохраняет данные и ставит элемент в очередь. Контекст трассировки
 // запоминается в hash, чтобы отправка через часы осталась в той же трассе.
+//
+// Повторный вызов с тем же id ничего не меняет: оркестратор может повторить задачу после
+// таймаута, а JetStream всё равно доставит и старую попытку — без этой проверки пациент
+// получил бы уведомление дважды (в том числе если первое уже отправлено и снято с очереди).
 func (d *Dispatcher) Schedule(ctx context.Context, id string, at time.Time, fields map[string]string) error {
+	first, err := d.st.SetNX(ctx, d.cfg.ItemPrefix+id+":once", "1")
+	if err != nil {
+		return err
+	}
+	if !first {
+		return nil
+	}
 	rec := make(map[string]string, len(fields)+3)
 	for k, v := range fields {
 		rec[k] = v

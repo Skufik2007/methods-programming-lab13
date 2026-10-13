@@ -239,6 +239,9 @@ func (h *Handler) schedule(ctx context.Context, t core.Task, pl core.Payload) (a
 		sendAt = now.Add(h.demo)
 	}
 	id := uuid.NewString()
+	if apptID != "" {
+		id = core.StableID("survey", apptID)
+	}
 	text := h.p.SurveyText
 	if text == "" {
 		text = "Оцените, пожалуйста, приём по шкале от 1 до 5 и расскажите, что можно улучшить."

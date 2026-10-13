@@ -142,6 +142,11 @@ func (h *Handler) Handle(ctx context.Context, t core.Task) (any, error) {
 		startsAt.In(h.loc).Format("02.01.2006 15:04 MST"))
 
 	plans := Schedule(startsAt, now, h.offsets, h.demo)
+	if apptID != "" {
+		for i := range plans {
+			plans[i].ID = core.StableID("reminder", apptID, strconv.Itoa(i))
+		}
+	}
 	out := make([]map[string]any, 0, len(plans))
 	for _, p := range plans {
 		fields := map[string]string{

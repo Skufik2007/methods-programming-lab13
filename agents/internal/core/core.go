@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Skufik2007/methods-programming-lab13/agents/internal/store"
+	"github.com/google/uuid"
 )
 
 // Clock — инжектируемые часы.
@@ -126,4 +128,10 @@ type Deps struct {
 
 	ReminderDemoDelay time.Duration
 	SurveyDemoDelay   time.Duration
+}
+
+// StableID — детерминированный UUID (v5) из частей: повторная обработка одной и той же
+// записи даёт те же идентификаторы напоминаний и опросов, и дубли не создаются.
+func StableID(parts ...string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("mas:"+strings.Join(parts, "|"))).String()
 }
