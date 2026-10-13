@@ -266,6 +266,8 @@ concurrency: 4
 |---|---|---|---|
 | `mas:slot:<doctor_id>:<slot_start>` | string | booking | id записи, `SET NX` — защита от двойной записи между экземплярами |
 | `mas:appt:<appointment_id>` | hash | booking | данные записи |
+| `mas:doctor:<doctor_id>:booked` | zset | booking | занятые слоты врача: member = `slot_start`, score = unix-время начала (для поиска свободных слотов и `load`) |
+| `mas:surveys:due` / `mas:survey:<id>` | zset / hash | feedback | запланированные опросы, тот же механизм, что у напоминаний |
 | `mas:reminders:due` | zset | reminder | reminder_id, score = unix-время отправки |
 | `mas:reminder:<id>` | hash | reminder | данные напоминания, статус |
 | `mas:stats:<agent_role>` | hash | все Go-агенты | счётчики `processed`, `failed`, `sent` — восстанавливаются после рестарта |
@@ -273,6 +275,8 @@ concurrency: 4
 
 Агент напоминаний после рестарта читает `mas:reminders:due` и продолжает отправлять
 просроченные и будущие напоминания; счётчики продолжаются с сохранённых значений.
+Отправку «забирает» тот экземпляр, чей `ZREM` вернул 1, — так несколько экземпляров
+не отправят одно напоминание дважды.
 
 ## 12. Динамическое масштабирование (задание 5)
 
