@@ -76,10 +76,19 @@ func (d *Dispatcher) Schedule(ctx context.Context, id string, at time.Time, fiel
 	if tp := mc.Get(traceField); tp != "" {
 		rec[traceField] = tp
 	}
-	if err := d.st.HSet(ctx, d.cfg.ItemPrefix+id, rec); err != nil {
+	// При сбое записи маркер снимается: иначе повтор задачи увидел бы «уже запланировано»
+	// и напоминание пропало бы без следа (находка №14).
+	rollback := func(err error) error {
+		_ = d.st.Del(ctx, d.cfg.ItemPrefix+id+":once", d.cfg.ItemPrefix+id)
 		return err
 	}
-	return d.st.ZAdd(ctx, d.cfg.DueKey, score(at), id)
+	if err := d.st.HSet(ctx, d.cfg.ItemPrefix+id, rec); err != nil {
+		return rollback(err)
+	}
+	if err := d.st.ZAdd(ctx, d.cfg.DueKey, score(at), id); err != nil {
+		return rollback(err)
+	}
+	return nil
 }
 
 // Tick забирает созревшие элементы и отправляет их; возвращает число отправленных.
