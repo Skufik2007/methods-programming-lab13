@@ -86,12 +86,24 @@ def _str_list(value: Any) -> list[str]:
     return []
 
 
+_CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
+# Иероглифы и кана: маленькие qwen-модели «соскальзывают» на китайский даже при русском промпте.
+_CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯]")
+
+
+def _require_russian(*texts: str) -> None:
+    joined = " ".join(texts)
+    if _CJK.search(joined) or not _CYRILLIC.search(joined):
+        raise LLMError("ответ модели не на русском языке")
+
+
 def parse_intake_response(content: str, complaint: str) -> IntakeOutput:
     """Валидирует ответ модели схемой; специальность — только из справочника.
     Красные флаги: модель может только добавить к найденным правилами, но не убрать."""
     data = extract_json_object(content)
     if not isinstance(data, dict):
         raise LLMError("ответ модели не объект JSON")
+    _require_russian(*_str_list(data.get("symptoms")), str(data.get("summary", "")))
     llm_flags = _str_list(data.get("red_flags"))
     flags = list(dict.fromkeys([*find_red_flags(complaint), *llm_flags]))
     try:
@@ -108,6 +120,8 @@ def parse_intake_response(content: str, complaint: str) -> IntakeOutput:
 
 def parse_reply_response(content: str) -> FeedbackReplyOutput:
     text = content.strip().strip('"').strip()
+    if text:
+        _require_russian(text)
     try:
         return FeedbackReplyOutput(reply=text[:1500], source="llm")
     except ValidationError as exc:
