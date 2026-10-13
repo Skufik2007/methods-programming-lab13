@@ -106,8 +106,9 @@ func prepare(list []string) []phrase {
 
 // normalize: нижний регистр, ё -> е, схлопывание пробелов.
 func normalize(s string) string {
-	s = strings.ToLower(strings.ReplaceAll(s, "ё", "е"))
-	s = strings.ReplaceAll(s, "Ё", "е")
+	// Сначала регистр, потом ё → е: иначе заглавная «Ё» после ToLower становится «ё»
+	// и «ОТЁК ГОРЛА» не совпадает с красным флагом «отек горла».
+	s = strings.ReplaceAll(strings.ToLower(s), "ё", "е")
 	return strings.Join(strings.Fields(s), " ")
 }
 
