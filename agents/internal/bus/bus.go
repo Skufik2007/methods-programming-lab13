@@ -207,7 +207,22 @@ func (b *Bus) RunHeartbeat(ctx context.Context) {
 
 // --- подписки core NATS ---
 
+// Subscribe подписывается и дожидается, пока сервер зарегистрирует подписку (Flush):
+// без этого агент считается готовым раньше, чем начнёт получать аукционы, и первая ставка
+// теряется (находка №15: под -race в CI второй агент записи не успевал подписаться).
 func (b *Bus) Subscribe(s core.Subscription) (*nats.Subscription, error) {
+	sub, err := b.subscribe(s)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.nc.Flush(); err != nil {
+		_ = sub.Unsubscribe()
+		return nil, fmt.Errorf("подписка %s: %w", s.Subject, err)
+	}
+	return sub, nil
+}
+
+func (b *Bus) subscribe(s core.Subscription) (*nats.Subscription, error) {
 	return b.nc.Subscribe(s.Subject, func(m *nats.Msg) {
 		ctx := b.prop.Extract(context.Background(), carrier(m.Header))
 		ctx, span := otel.Tracer(tracerName).Start(ctx, s.Span, trace.WithSpanKind(trace.SpanKindServer),
