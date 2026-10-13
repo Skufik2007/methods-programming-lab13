@@ -16,22 +16,26 @@ def bid_cost(skill: float, availability: float, load: float) -> float:
     return 0.5 * (1 - availability) + 0.3 * load + 0.2 * (1 - skill)
 
 
-def _slot_key(slot_start: str) -> tuple[int, datetime | str]:
+def _slot_time(slot_start: str) -> datetime | None:
+    """Время слота по RFC 3339 (раздел 4: с часовым поясом); иначе None — ставка некорректна."""
     try:
-        return 0, parse_ts(slot_start)
+        moment = parse_ts(slot_start)
     except ValueError:
-        return 1, slot_start
+        return None
+    return moment if moment.tzinfo is not None else None
 
 
 def choose_winner(bids: list[Bid]) -> Bid | None:
     """Минимальный cost среди eligible; при равенстве — раньше slot_start, затем agent_id.
 
+    Ставки со слотом не по RFC 3339 (в том числе без часового пояса) пропускаются: их нельзя
+    сравнить с остальными, а сравнение naive и aware datetime роняло весь раунд аукциона.
     Стоимость сравнивается с округлением до 9 знаков, чтобы шум float не ломал ничью.
     """
-    eligible = [b for b in bids if b.eligible]
-    if not eligible:
+    ranked = [(b, slot) for b in bids if b.eligible and (slot := _slot_time(b.slot_start)) is not None]
+    if not ranked:
         return None
-    return min(eligible, key=lambda b: (round(b.cost, 9), _slot_key(b.slot_start), b.agent_id))
+    return min(ranked, key=lambda item: (round(item[0].cost, 9), item[1], item[0].agent_id))[0]
 
 
 def parse_bids(raw: list[bytes], auction_id: str) -> list[Bid]:
