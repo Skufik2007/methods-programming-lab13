@@ -90,6 +90,13 @@ async def publish_result(bus: MessageBus, result: Result) -> None:
     await bus.publish(f"results.{result.run_id}", result.model_dump_json().encode())
 
 
+def _trace_headers() -> dict[str, str]:
+    """Заголовки с traceparent текущего спана: аукцион и бронь — часть трассы запуска."""
+    headers: dict[str, str] = {}
+    inject_traceparent(headers)
+    return headers
+
+
 def ack_wait_for(step: str) -> float:
     """AckWait из раздела 3: 120 с для LLM-шагов, 30 с для остальных."""
     return 120.0 if step in LLM_STEPS else 30.0
@@ -184,7 +191,7 @@ class NatsBus:
 
     async def request(self, subject: str, data: bytes, timeout: float) -> BusMessage:
         try:
-            msg = await self.nc.request(subject, data, timeout=timeout)
+            msg = await self.nc.request(subject, data, timeout=timeout, headers=_trace_headers())
         except nats.errors.TimeoutError as exc:
             raise TimeoutError(f"нет ответа на {subject}") from exc
         except nats.errors.NoRespondersError as exc:
@@ -199,7 +206,7 @@ class NatsBus:
         replies: list[BusMessage] = []
         try:
             await nc.flush()
-            await nc.publish(subject, data, reply=inbox)
+            await nc.publish(subject, data, reply=inbox, headers=_trace_headers())
             deadline = time.monotonic() + window
             while (left := deadline - time.monotonic()) > 0:
                 try:
