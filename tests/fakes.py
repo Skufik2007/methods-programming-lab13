@@ -10,8 +10,10 @@ from typing import Any
 from mas.common.bus import BusMessage
 from mas.common.models import Task
 
-# Ответчик шага: задача → (success, output) либо None (агент молчит → таймаут).
-StepResponder = Callable[[Task], tuple[bool, dict[str, Any]] | None]
+# Ответчик шага: задача → (success, output), либо (success, output, поля результата),
+# где поля перекрывают сгенерированные (например, {"retryable": True, "error": "..."}),
+# либо None — агент молчит, оркестратор получит таймаут.
+StepResponder = Callable[[Task], tuple[Any, ...] | None]
 
 
 class _Sub:
@@ -27,7 +29,7 @@ class FakeBus:
         self,
         steps: dict[str, StepResponder] | None = None,
         bids: list[dict[str, Any]] | None = None,
-        book: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        book: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     ) -> None:
         self.steps = steps or {}
         self.bids = bids or []
@@ -51,10 +53,11 @@ class FakeBus:
         responder = self.steps.get(task.step)
         answer = responder(task) if responder else None
         if answer is not None:
-            success, output = answer
+            success, output, *rest = answer
+            extra = rest[0] if rest else {}
             result = {
                 "task_id": task.task_id, "run_id": task.run_id, "step": task.step, "agent_id": f"{task.step}-1",
-                "success": success, "output": output, "error": "" if success else "ошибка",
+                "success": success, "output": output, "error": "" if success else "ошибка", **extra,
             }
             msg = BusMessage(f"results.{task.run_id}", json.dumps(result).encode())
             asyncio.get_running_loop().call_soon(lambda: asyncio.ensure_future(self.handlers["results.>"](msg)))
@@ -70,4 +73,7 @@ class FakeBus:
     async def request(self, subject: str, data: bytes, timeout: float) -> BusMessage:
         req = json.loads(data)
         self.book_requests.append(req)
-        return BusMessage("inbox", json.dumps(self.book(req)).encode())
+        reply = self.book(req)
+        if reply is None:  # агент записи молчит → оркестратор получает TimeoutError, как от NatsBus
+            raise TimeoutError(f"нет ответа на {subject}")
+        return BusMessage("inbox", json.dumps(reply).encode())
