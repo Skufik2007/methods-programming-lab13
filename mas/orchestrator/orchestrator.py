@@ -405,7 +405,8 @@ class Orchestrator:
         else:
             output = {k: v for k, v in reply.items() if k not in ("success", "error")}
         output.setdefault("agent_id", winner.agent_id)
-        output.setdefault("auction", {"bids": len(bids), "winner_cost": winner.cost})
+        # Итоги аукциона знает только оркестратор: агент записи кладёт сюда нули.
+        output["auction"] = {"bids": len(bids), "winner_cost": winner.cost}
         return StepOutcome(True, output, agent_id=winner.agent_id)
 
     # ---- обработчики шины -----------------------------------------------------------
