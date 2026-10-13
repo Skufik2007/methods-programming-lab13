@@ -40,7 +40,9 @@ class SecurityHeadersMiddleware:
                 headers = MutableHeaders(scope=message)
                 headers["Content-Security-Policy"] = CSP_STRICT
                 headers["X-Content-Type-Options"] = "nosniff"
-                headers["Referrer-Policy"] = "no-referrer"
+                # Не no-referrer: при нём Chromium шлёт POST формы с Origin: null, и проверка
+                # CSRF в app.py отклоняет собственные формы дашборда.
+                headers["Referrer-Policy"] = "same-origin"
                 headers["X-Frame-Options"] = "DENY"
             await send(message)
 
