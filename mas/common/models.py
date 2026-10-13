@@ -150,6 +150,8 @@ class BookRequest(_Base):
     slot_start: str
     patient_id: str
     patient_name: str
+    # Окно пациента: если слот уже заняли, агент берёт следующий слот того же врача в нём.
+    max_wait_hours: float = 0.0
 
 
 class Heartbeat(_Base):

@@ -69,6 +69,9 @@ type BookRequest struct {
 	PatientName string  `json:"patient_name"`
 	Bids        int     `json:"bids"`
 	WinnerCost  float64 `json:"winner_cost"`
+	// MaxWaitHours — окно ожидания пациента. Если выигранный слот уже занят, агент записывает
+	// на ближайший свободный слот того же врача в этом окне; 0 — без замены (slot_taken).
+	MaxWaitHours float64 `json:"max_wait_hours"`
 }
 
 type Service struct {
@@ -172,6 +175,32 @@ func (s *Service) firstFree(ctx context.Context, d Doctor, now time.Time) (sched
 		}
 	}
 	return schedule.Slot{}, false, nil
+}
+
+// claimNext атомарно занимает ближайший свободный слот врача строго после after и не позже
+// deadline. Нужен при одновременных аукционах: все они видят один и тот же ближайший слот,
+// и без замены проигравшие бронь сталкивались бы раунд за раундом (находка №12).
+func (s *Service) claimNext(ctx context.Context, d Doctor, after, deadline time.Time, apptID string) (time.Time, bool, error) {
+	busy, err := s.busy(ctx, d, after.Add(-24*time.Hour), deadline.Add(24*time.Hour))
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	for day := after; !day.After(deadline.Add(24 * time.Hour)); day = day.AddDate(0, 0, 1) {
+		for _, slot := range schedule.FreeSlots(d.Sched, day, s.loc, busy, after, s.horizon+1) {
+			if slot.Start.After(deadline) {
+				return time.Time{}, false, nil
+			}
+			key := SlotKey(d.ID, slot.Start.UTC().Format(time.RFC3339))
+			ok, err := s.st.SetNX(ctx, key, apptID)
+			if err != nil {
+				return time.Time{}, false, err
+			}
+			if ok {
+				return slot.Start.UTC(), true, nil
+			}
+		}
+	}
+	return time.Time{}, false, nil
 }
 
 // load — доля занятых слотов врача на ближайшие 7 суток.
@@ -319,7 +348,19 @@ func (s *Service) Book(ctx context.Context, req BookRequest) core.Result {
 		return fail("redis: "+err.Error(), true)
 	}
 	if !taken {
-		return fail("slot_taken", false)
+		if req.MaxWaitHours <= 0 {
+			return fail("slot_taken", false)
+		}
+		deadline := s.clock.Now().Add(time.Duration(req.MaxWaitHours * float64(time.Hour)))
+		alt, ok, err := s.claimNext(ctx, d, start, deadline, apptID)
+		if err != nil {
+			return fail("redis: "+err.Error(), true)
+		}
+		if !ok {
+			return fail("slot_taken", false)
+		}
+		start, slotStart = alt, alt.Format(time.RFC3339)
+		end = start.Add(time.Duration(d.Sched.SlotMinutes) * time.Minute)
 	}
 	rec := map[string]string{
 		"appointment_id": apptID, "run_id": req.RunID, "auction_id": req.AuctionID,

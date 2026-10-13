@@ -401,6 +401,7 @@ class Orchestrator:
             slot_start=winner.slot_start,
             patient_id=str(run.case.get("patient_id", "")),
             patient_name=str(run.case.get("patient_name", "")),
+            max_wait_hours=max_wait,
         )
         try:
             msg = await self.bus.request(
