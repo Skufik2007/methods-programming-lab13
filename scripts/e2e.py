@@ -174,7 +174,8 @@ class E2E:
     def online_roles(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for agent in self.get("/api/agents")["agents"]:
-            if agent.get("online"):
+            # В API дашборда нет поля online: «в сети» — heartbeat моложе 15 с (раздел 9 контракта).
+            if float(agent.get("age_s", 1e9)) < 15 and agent.get("status") != "stopping":
                 counts[agent["role"]] = counts.get(agent["role"], 0) + 1
         return counts
 
@@ -314,7 +315,17 @@ class E2E:
             return counts if counts.get("running", 0) == 0 else None
 
         counts = wait_until(done, self.args.timeout * 2, interval=3)
-        self.rep.check(counts is not None, "обращения нагрузки обработаны", str(counts or "не все завершились"))
+        errors: dict[str, int] = {}
+        for rid in run_ids:
+            run = self.get(f"/api/runs/{rid}")["run"]
+            if run["status"] == "failed":
+                errors[run["error"][:80]] = errors.get(run["error"][:80], 0) + 1
+        # Провалившийся запуск — это пациент без записи и без рекомендации: так быть не должно.
+        self.rep.check(
+            counts is not None and not errors,
+            "обращения нагрузки обработаны без провалов",
+            f"{counts or 'не все завершились'}; ошибки: {errors or 'нет'}",
+        )
 
     # -- этап 3: Redis
 
